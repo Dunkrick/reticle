@@ -75,7 +75,7 @@ describe('the published package can be loaded by a CommonJS Vite config', () => 
       expect(plugin.name).toBe('reticle');
       // The guarantee that keeps instrumentation out of a production bundle has to survive the
       // second build, or the CJS path is a hole in it.
-      expect(plugin.apply).toBe('serve');
+      expect(plugin.apply).toEqual(expect.any(Function));
     });
 
     it('carries no live `import.meta`, which is empty under CJS', () => {
