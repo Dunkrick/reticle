@@ -1,4 +1,9 @@
-const RETICLE_DISABLED_STUB_CODE = `
+export const RETICLE_DISABLED_STUB = '\0reticle-disabled-stub';
+
+export const isReticleDisabledWebBuild = (desktop: boolean, command: string | undefined): boolean =>
+  !desktop && 'build' === command;
+
+export const RETICLE_DISABLED_STUB_CODE = `
 export class Reticle {
   connect() {}
   signal() {}
@@ -181,5 +186,3 @@ export function resolveMarkAnchor() {
   return undefined;
 }
 `;
-
-export { RETICLE_DISABLED_STUB_CODE };

@@ -30,7 +30,7 @@ describe('reticle vite plugin', () => {
   it('applies during serve and build', () => {
     const plugin = reticle();
     expect(plugin.name).toBe(RETICLE_VITE_PLUGIN_NAME);
-    expect(plugin.apply).toEqual(expect.any(Function));
+    expect((plugin as { apply?: unknown }).apply).toBe(undefined);
     expect(plugin.enforce).toBe('pre');
   });
 
@@ -148,12 +148,13 @@ describe('reticle vite plugin', () => {
 describe('desktop mode', () => {
   /**
    * A packaged Electron/Tauri renderer is a PRODUCTION Vite build loaded from `file://` or a custom
-   * protocol — there is no dev server. The web plugin participates in both serve and build, while
-   * desktop mode remains responsible for packaged-renderer instrumentation.
+   * protocol — there is no dev server. Neither desktop nor web restricts `apply` any more, so both
+   * run during `vite build`; what differs is what each does there — web swaps the browser SDK for
+   * an inert stub (see build.integration.test.ts), desktop keeps the real `connect()` wiring.
    */
-  it('applies to build (not just serve) so a packaged renderer is instrumented', () => {
-    expect(reticle({ desktop: true }).apply).toBe(undefined);
-    expect(reticle().apply).toEqual(expect.any(Function));
+  it('never restricts apply, so a packaged renderer still runs the plugin during build', () => {
+    expect((reticle({ desktop: true }) as { apply?: unknown }).apply).toBe(undefined);
+    expect((reticle() as { apply?: unknown }).apply).toBe(undefined);
   });
 
   it('allows the SDK to run in a production-mode renderer, which desktop always is', () => {

@@ -26,7 +26,11 @@ import {
   optimizerOptionsKey,
   optimizerOptions,
 } from './installed.js';
-import { RETICLE_DISABLED_STUB_CODE } from './disabled-browser-stub.js';
+import {
+  RETICLE_DISABLED_STUB_CODE,
+  RETICLE_DISABLED_STUB,
+  isReticleDisabledWebBuild,
+} from './disabled-browser-stub.js';
 
 export const RETICLE_VITE_PLUGIN_NAME = 'reticle';
 
@@ -48,7 +52,7 @@ const JSX_FILE = /\.[jt]sx$/;
 /** Rollup virtual-module ids start with a NUL byte; never transform those. */
 const VIRTUAL_PREFIX = '\0';
 const NODE_MODULES = 'node_modules';
-const RETICLE_DISABLED_STUB = '\0reticle-disabled-stub';
+
 /**
  * The connect code is served as a real module (not an inline <script>) so that Vite's import
  * pipeline resolves the bare `@reticlehq/react` specifier. An inline injected script is NOT run through
@@ -138,10 +142,6 @@ export const connectChurnWarning = (): string =>
   'https://github.com/ReticleHQ/reticle/issues with your vite.config and whether more than one ' +
   'daemon is running (`npx @reticlehq/server status`).';
 
-interface ViteApplyEnvLike {
-  command: 'serve' | 'build';
-}
-
 export interface ReticleVitePluginOptions {
   /** Bridge WebSocket port. Defaults to the SDK default; only baked into connect when non-default. */
   port?: number;
@@ -172,10 +172,8 @@ export interface ReticleVitePluginOptions {
    * This build is an Electron/Tauri renderer. Changes two things a desktop shell needs and a web app
    * must not get:
    *
-   *  - The plugin also applies to `vite build`. A packaged desktop renderer IS a production build
-   *    loaded from `file://` or a custom protocol — there is no dev server — so the default
-   *    The web plugin participates in both serve and build. During a production build, it replaces
-   *    the browser SDK with an inert stub so the app ships with no Reticle runtime code.
+   *  - A packaged desktop renderer IS a production build with no dev server, so it needs the real
+   *    `connect()` wiring during `vite build` — the web default's stub-swap must not apply to it.
    *  - `connect()` is called with `allowInProduction`, because that same renderer reports
    *    NODE_ENV=production and the SDK's prod backstop would otherwise refuse to start.
    *
@@ -307,8 +305,6 @@ export interface ReticleVitePlugin {
     define: Record<string, string>;
     server: { watch: { ignored: WatchPattern[] } };
   };
-  /** Absent in desktop mode, where the plugin must also run for `vite build`. */
-  apply?: 'serve' | 'build' | ((this: void, config: unknown, env: ViteApplyEnvLike) => boolean);
   enforce: 'pre';
   transform: (code: string, id: string) => { code: string; map: string | null } | null;
   resolveId: (id: string, importer?: string) => string | null;
@@ -615,15 +611,14 @@ export function connectModuleSource(
  * import { reticle } from '@reticlehq/vite-plugin';
  * export default defineConfig({ plugins: [react(), reticle()] });
  *
- * The web plugin participates in the build pipeline so it can replace the browser SDK with an
- * inert stub. Production builds therefore contain no Reticle runtime code when the plugin is
- * used in its default web configuration.
+ * The web plugin also builds, replacing the browser SDK with an inert stub so a default
+ * production bundle ships no Reticle runtime code at all.
  *
  * `desktop: true` is the ONE documented exception, and it inverts that guarantee deliberately: a
- * packaged Electron/Tauri renderer IS a production build with no dev server, so serve-only gating
- * would ship an app with no connect() at all. The cost is that the flag hands gating back to the
- * caller — keep it behind your own dev-only build target so an instrumented bundle can never reach
- * a release binary.
+ * packaged Electron/Tauri renderer IS a production build with no dev server, so the web default's
+ * stub-replacement would ship an app with no connect() at all. The cost is that the flag hands
+ * gating back to the caller — keep it behind your own dev-only build target so an instrumented
+ * bundle can never reach a release binary.
  */
 /**
  * The daemon's journal directory, as a matcher every chokidar major honours.
@@ -639,7 +634,6 @@ export function reticle(options: ReticleVitePluginOptions = {}): ReticleVitePlug
   const sourceMapping = options.sourceMapping !== false;
   const inject = options.inject !== false;
   const desktop = true === options.desktop;
-  const isWebBuild = () => !desktop && 'build' === command;
   // Resolve the stable projectId once (explicit option, else derived from package.json + cwd) so the
   // app is identifiable across port changes with zero config.
   const resolved: ReticleVitePluginOptions = {
@@ -730,12 +724,6 @@ export function reticle(options: ReticleVitePluginOptions = {}): ReticleVitePlug
 
   return {
     name: RETICLE_VITE_PLUGIN_NAME,
-    // Web: participate in serve and build so production builds can replace the SDK with the inert stub.
-    // Desktop: a packaged renderer IS a production build with no dev server, so the plugin must also
-    // run for `vite build` or the shipped app has no connect() at all.
-    ...(true === options.desktop
-      ? {}
-      : { apply: (_config, { command }) => 'serve' === command || 'build' === command }),
     enforce: 'pre',
     /**
      * Declare the SDK itself and the optimizer cache fingerprint.
@@ -832,7 +820,7 @@ export function reticle(options: ReticleVitePluginOptions = {}): ReticleVitePlug
       };
     },
     transform(code, id) {
-      if (isWebBuild()) return null;
+      if (isReticleDisabledWebBuild(desktop, command)) return null;
       // Desktop injection: prepend connect() to the HTML's own entry module. It is a REAL module, so
       // its bare `@reticlehq/react` import resolves through the normal pipeline in both dev and
       // build — which a virtual <script src> only ever did in dev.
@@ -854,9 +842,7 @@ export function reticle(options: ReticleVitePluginOptions = {}): ReticleVitePlug
       return stamp(code, id);
     },
     resolveId(id, importer) {
-      // In a web build, if we are asked to resolve the sensor module, return a stub that does
-      // nothing. We do not want users to be able to "import sensor" in a web build.
-      if (isWebBuild() && id === RETICLE_SENSOR) {
+      if (isReticleDisabledWebBuild(desktop, command) && id === RETICLE_SENSOR) {
         return RETICLE_DISABLED_STUB;
       }
       // Desktop: remember the module the HTML points at, so `transform` can prepend connect() into
@@ -874,10 +860,9 @@ export function reticle(options: ReticleVitePluginOptions = {}): ReticleVitePlug
       return inject && id === RETICLE_CONNECT_MODULE ? RETICLE_CONNECT_MODULE : null;
     },
     load(id) {
-      if (isWebBuild() && id === RETICLE_DISABLED_STUB) {
+      if (isReticleDisabledWebBuild(desktop, command) && id === RETICLE_DISABLED_STUB) {
         return RETICLE_DISABLED_STUB_CODE;
       }
-
       if (!inject || id !== RETICLE_CONNECT_MODULE) return null;
       const source = currentConnectSource();
       lastServedConnectSource = source;
@@ -985,7 +970,7 @@ export function reticle(options: ReticleVitePluginOptions = {}): ReticleVitePlug
     },
     checkInjectedForTest: checkInjected,
     transformIndexHtml() {
-      if (isWebBuild()) return [];
+      if (isReticleDisabledWebBuild(desktop, command)) return [];
       // In serve, the HTML is sent BEFORE the browser requests the entry module, so the check has to
       // be deferred — asserting here would fire on every healthy start. Unref'd so a dev server is
       // never held open by it.
