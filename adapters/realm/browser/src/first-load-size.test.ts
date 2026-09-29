@@ -246,7 +246,10 @@ const DIST_ENTRY = join(PACKAGE_ROOT, 'dist', 'index.js');
  * with the lazy panel; it moved to the `@reticlehq/core/hud` subpath and left. Raised by 1,000 over
  * the measurement, per the note above.
  */
-const MAX_FIRST_LOAD_BYTES = 243_400;
+/*
+ * 243_300 -> 243_500: fieldset/legend accessible-name naming.
+ */
+const MAX_FIRST_LOAD_BYTES = 243_500;
 /*
  * Raised a fifth time, 233_300 -> 233_400, for a route to be assertable in a SAVED flow. 57 B.
  *
