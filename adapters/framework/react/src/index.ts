@@ -309,9 +309,32 @@ export function hasHoverHandlers(el: Element): boolean {
   return HOVER_HANDLER_KEYS.some((k) => 'function' === typeof p[k]);
 }
 
-import { installRenderMeter } from './render-meter.js';
+import { installRenderMeter, resetRenderMeterForTest } from './render-meter.js';
 
 let installed = false;
+
+/**
+ * Options for {@link install}.
+ */
+export interface InstallOptions {
+  /**
+   * When `true` (the default), `install` automatically registers stores it finds in the React
+   * fiber tree — Redux `Provider`, TanStack `QueryClientProvider`, and similar context providers.
+   * The discovery runs over the first ten React commits so that late-mounting providers
+   * (lazy routes, effects) are also found.
+   *
+   * Set to `false` to skip auto-discovery entirely. Use this when your app holds more than one
+   * context provider and you want to expose only the stores you name explicitly with
+   * `registerStore`. The render meter still runs with this option set to `false`.
+   *
+   * @example
+   * ```ts
+   * install({ discoverStores: false });
+   * registerStore('safe', safeStore);
+   * ```
+   */
+  discoverStores?: boolean;
+}
 
 /**
  * Wire up React support: the adapter for `reticle.inspect`, and the render meter.
@@ -322,18 +345,26 @@ let installed = false;
  * for a documented capability is how a feature ships dead — an agent asking for render counts gets
  * silence, indistinguishable from an idle page.
  */
-export function install(): void {
+export function install(options?: InstallOptions): void {
   if (installed) return;
   installed = true;
   registerAdapter({ name: 'react', identify, readState, hasHoverHandlers });
-  installRenderMeter();
+  installRenderMeter({ discoverStores: false !== options?.discoverStores });
+}
+
+/** Reset install state for test isolation. */
+export function resetInstallForTest(): void {
+  installed = false;
+  resetRenderMeterForTest();
 }
 
 export {
   installRenderMeter,
   resetRenderMeter,
   getRenderStats,
+  resetRenderMeterForTest,
   type RenderStats,
+  type RenderMeterOptions,
 } from './render-meter.js';
 export {
   HYDRATION_COMPLETE_SIGNAL,
